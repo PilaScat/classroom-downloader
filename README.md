@@ -1,30 +1,30 @@
 # Classroom Downloader
 
-Scarica automaticamente tutto il materiale da Google Classroom e lo mantiene sincronizzato.  
-I file Google Workspace vengono esportati sia in PDF che nel formato Office corrispondente.
+Automatically downloads all materials from Google Classroom and keeps them in sync.  
+Google Workspace files are exported in both PDF and the corresponding Office format.
 
-## Formati di esportazione
+## Export formats
 
-| Tipo Google | File prodotti |
+| Google type | Output files |
 |---|---|
 | Google Doc | `.pdf` + `.docx` |
 | Google Sheet | `.pdf` + `.xlsx` |
 | Google Slides | `.pdf` + `.pptx` |
 | Google Drawing | `.pdf` |
-| File binari (PDF, immagini, …) | download diretto |
+| Binary files (PDF, images, …) | direct download |
 
-## Struttura dei download
+## Download structure
 
 ```
 downloads/
-├── file_non_scaricati.txt   ← generato automaticamente se ci sono errori
-└── Nome Corso/
+├── file_non_scaricati.txt   ← auto-generated if any files could not be downloaded
+└── Course Name/
     ├── Materiali/
-    │   └── Titolo Materiale/
+    │   └── Material Title/
     │       ├── file.pdf
     │       └── file.docx
     ├── Compiti/
-    │   └── Titolo Compito/
+    │   └── Assignment Title/
     │       └── file.pdf
     └── Annunci/
         └── file.pdf
@@ -34,47 +34,47 @@ downloads/
 
 ## Setup
 
-### 1. Crea il progetto Google Cloud
+### 1. Create a Google Cloud project
 
-1. Vai su [Google Cloud Console](https://console.cloud.google.com/)
-2. Crea un nuovo progetto (o usa uno esistente)
-3. Abilita le API:
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project (or use an existing one)
+3. Enable the following APIs:
    - **Google Classroom API**
    - **Google Drive API**
-4. Vai su **APIs & Services → Credentials**
-5. Crea credenziali → **OAuth 2.0 Client ID**
+4. Go to **APIs & Services → Credentials**
+5. Create credentials → **OAuth 2.0 Client ID**
    - Application type: **Desktop app**
-6. Scarica il file JSON e rinominalo `credentials.json`
-7. Mettilo nella cartella `data/`:
+6. Download the JSON file and rename it `credentials.json`
+7. Place it in the `data/` folder:
 
 ```bash
 mkdir data
 mv ~/Downloads/credentials.json data/credentials.json
 ```
 
-### 2. Prima autenticazione (una volta sola)
+### 2. First-time authentication (once only)
 
-L'autenticazione va eseguita **direttamente sull'host** (non dentro Docker) perché richiede un browser locale.
+Authentication must be run **directly on the host** (not inside Docker) because it requires a local browser.
 
 ```bash
-# Crea un virtualenv e installa le dipendenze
+# Create a virtualenv and install dependencies
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# Esegui l'autenticazione
+# Run authentication
 DATA_DIR=./data .venv/bin/python src/main.py auth
 ```
 
-Verrà stampato un URL — aprilo nel browser, autorizza l'app con il tuo account Google.  
-Il token viene salvato automaticamente in `data/token.pickle` e usato da Docker a ogni sync.
+A URL will be printed — open it in your browser and authorize the app with your Google account.  
+The token is saved automatically to `data/token.pickle` and used by Docker on every sync.
 
-### 3. Avvia il downloader
+### 3. Start the downloader
 
 ```bash
 docker compose up -d
 ```
 
-### 4. Controlla i log
+### 4. Check logs
 
 ```bash
 docker compose logs -f
@@ -82,35 +82,35 @@ docker compose logs -f
 
 ---
 
-## Configurazione
+## Configuration
 
-Copia `.env.example` in `.env` e modifica:
+Copy `.env.example` to `.env` and edit as needed:
 
 ```env
-SYNC_INTERVAL_MINUTES=60   # frequenza di sincronizzazione
+SYNC_INTERVAL_MINUTES=60   # sync frequency in minutes
 ```
 
 ---
 
-## Comandi utili
+## Useful commands
 
-| Comando | Descrizione |
+| Command | Description |
 |---------|-------------|
-| `docker compose up -d` | Avvia in background |
-| `docker compose down` | Ferma |
-| `docker compose logs -f` | Segui i log |
-| `DATA_DIR=./data .venv/bin/python src/main.py auth` | Ri-autentica |
+| `docker compose up -d` | Start in background |
+| `docker compose down` | Stop |
+| `docker compose logs -f` | Follow logs |
+| `DATA_DIR=./data .venv/bin/python src/main.py auth` | Re-authenticate |
 
-Per forzare il re-download di tutti i file, elimina `data/state.json`.
+To force a full re-download of all files, delete `data/state.json`.
 
 ---
 
-## Come funziona
+## How it works
 
-1. Al primo avvio esegue subito una sincronizzazione completa
-2. Ogni `SYNC_INTERVAL_MINUTES` minuti controlla se ci sono nuovi materiali
-3. Tiene traccia dei file già scaricati in `data/state.json`
-4. Se un file locale viene eliminato, viene riscaricato al prossimo ciclo
-5. I file Google Workspace vengono esportati in PDF e nel formato Office corrispondente tramite la Drive API
-6. In caso di rate limit o errori transitori, riprova automaticamente fino a 5 volte con backoff esponenziale
-7. I file non scaricabili (es. con restrizioni del proprietario) vengono elencati in `downloads/file_non_scaricati.txt` con il link Drive diretto
+1. On first start, performs an immediate full sync
+2. Every `SYNC_INTERVAL_MINUTES` minutes, checks for new materials
+3. Tracks already-downloaded files in `data/state.json`
+4. If a local file is deleted, it will be re-downloaded on the next cycle
+5. Google Workspace files are exported to PDF and the corresponding Office format via the Drive API
+6. On rate limit or transient errors, retries automatically up to 5 times with exponential backoff
+7. Files that cannot be downloaded (e.g. owner-restricted) are listed in `downloads/file_non_scaricati.txt` with a direct Drive link
