@@ -9,12 +9,15 @@ from googleapiclient.errors import HttpError
 
 logger = logging.getLogger(__name__)
 
-# Google Workspace MIME types that can be exported as PDF
-EXPORTABLE_AS_PDF = {
-    "application/vnd.google-apps.document",
-    "application/vnd.google-apps.spreadsheet",
-    "application/vnd.google-apps.presentation",
-    "application/vnd.google-apps.drawing",
+# Maps Google Workspace MIME types to their export format (mime, extension)
+EXPORT_FORMATS: dict[str, tuple[str, str]] = {
+    "application/vnd.google-apps.document":     ("application/pdf", ".pdf"),
+    "application/vnd.google-apps.presentation": ("application/pdf", ".pdf"),
+    "application/vnd.google-apps.drawing":      ("application/pdf", ".pdf"),
+    "application/vnd.google-apps.spreadsheet":  (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".xlsx",
+    ),
 }
 
 # Google Workspace types that cannot be meaningfully exported
@@ -24,8 +27,6 @@ UNEXPORTABLE = {
     "application/vnd.google-apps.map",
     "application/vnd.google-apps.script",
 }
-
-PDF_MIME = "application/pdf"
 
 
 def sanitize(name: str, max_len: int = 180) -> str:
@@ -52,8 +53,9 @@ def download_file(drive_svc, file_id: str, dest_dir: str, hint_title: str | None
     name = sanitize(hint_title or meta.get("name", file_id))
     os.makedirs(dest_dir, exist_ok=True)
 
-    if mime in EXPORTABLE_AS_PDF:
-        return _export_as_pdf(drive_svc, file_id, meta["name"], name, dest_dir)
+    if mime in EXPORT_FORMATS:
+        export_mime, ext = EXPORT_FORMATS[mime]
+        return _export(drive_svc, file_id, meta["name"], name, dest_dir, export_mime, ext)
 
     if mime.startswith("application/vnd.google-apps."):
         logger.info("Skipping non-exportable Google file: %s (%s)", meta["name"], mime)
@@ -62,11 +64,11 @@ def download_file(drive_svc, file_id: str, dest_dir: str, hint_title: str | None
     return _download_binary(drive_svc, file_id, meta["name"], name, dest_dir)
 
 
-def _export_as_pdf(drive_svc, file_id: str, display_name: str, safe_name: str, dest_dir: str) -> str | None:
-    dest_path = os.path.join(dest_dir, safe_name + ".pdf")
+def _export(drive_svc, file_id: str, display_name: str, safe_name: str, dest_dir: str, mime: str, ext: str) -> str | None:
+    dest_path = os.path.join(dest_dir, safe_name + ext)
     logger.info("Exporting  %s → %s", display_name, dest_path)
     try:
-        request = drive_svc.files().export_media(fileId=file_id, mimeType=PDF_MIME)
+        request = drive_svc.files().export_media(fileId=file_id, mimeType=mime)
         _write_stream(request, dest_path)
         return dest_path
     except HttpError as exc:
