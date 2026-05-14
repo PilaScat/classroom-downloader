@@ -1,7 +1,17 @@
 # Classroom Downloader
 
 Scarica automaticamente tutto il materiale da Google Classroom e lo mantiene sincronizzato.  
-I file Google (Docs, Sheets, Slides) vengono esportati in PDF.
+I file Google Workspace vengono esportati sia in PDF che nel formato Office corrispondente.
+
+## Formati di esportazione
+
+| Tipo Google | File prodotti |
+|---|---|
+| Google Doc | `.pdf` + `.docx` |
+| Google Sheet | `.pdf` + `.xlsx` |
+| Google Slides | `.pdf` + `.pptx` |
+| Google Drawing | `.pdf` |
+| File binari (PDF, immagini, …) | download diretto |
 
 ## Struttura dei download
 
@@ -10,12 +20,15 @@ downloads/
 └── Nome Corso/
     ├── Materiali/
     │   └── Titolo Materiale/
-    │       └── file.pdf
+    │       ├── file.pdf
+    │       └── file.docx
     ├── Compiti/
     │   └── Titolo Compito/
-    │       └── file.pdf
+    │       ├── file.pdf
+    │       └── file.docx
     └── Annunci/
-        └── file.pdf
+        ├── file.pdf
+        └── file.docx
 ```
 
 ---
@@ -91,4 +104,4 @@ Per forzare il re-download di tutti i file, elimina `data/state.json`.
 2. Ogni `SYNC_INTERVAL_MINUTES` minuti controlla se ci sono nuovi materiali
 3. Tiene traccia dei file già scaricati in `data/state.json`
 4. Se un file locale viene eliminato, viene riscaricato al prossimo ciclo
-5. Google Docs/Sheets/Slides vengono esportati come PDF tramite la Drive API
+5. I file Google Workspace vengono esportati in PDF e nel formato Office corrispondente tramite la Drive API
