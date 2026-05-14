@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 SCOPES = [
     "https://www.googleapis.com/auth/classroom.courses.readonly",
-    "https://www.googleapis.com/auth/classroom.coursework.me.readonly",
+    "https://www.googleapis.com/auth/classroom.student-submissions.me.readonly",
     "https://www.googleapis.com/auth/classroom.courseworkmaterials.readonly",
     "https://www.googleapis.com/auth/classroom.announcements.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
@@ -29,7 +29,7 @@ def authenticate():
             "Download it from Google Cloud Console → APIs & Services → Credentials."
         )
     flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
-    creds = flow.run_console()
+    creds = flow.run_local_server(port=0, open_browser=False)
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(TOKEN_PATH, "wb") as fh:
         pickle.dump(creds, fh)

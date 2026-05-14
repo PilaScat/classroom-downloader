@@ -55,13 +55,32 @@ class Syncer:
     # ------------------------------------------------------------------ sync
 
     def sync(self):
+        self._failures: list[dict] = []
         total_new = 0
         for course in cl.list_courses(self.classroom):
             new = self._sync_course(course)
             total_new += new
         self._state["last_sync"] = datetime.now(timezone.utc).isoformat()
         self._save_state()
+        self._write_failures_log()
         logger.info("Sync done — %d new file(s) downloaded.", total_new)
+
+    def _write_failures_log(self):
+        path = os.path.join(DOWNLOADS_DIR, "file_non_scaricati.txt")
+        if not self._failures:
+            if os.path.exists(path):
+                os.remove(path)
+            return
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(f"File non scaricati — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            fh.write("=" * 60 + "\n\n")
+            for entry in self._failures:
+                fh.write(f"- {entry['title']}\n")
+                fh.write(f"  https://drive.google.com/file/d/{entry['file_id']}/view\n")
+                if entry.get("reason"):
+                    fh.write(f"  Motivo: {entry['reason']}\n")
+                fh.write("\n")
+        logger.info("Failures log written to %s (%d file(s))", path, len(self._failures))
 
     def _sync_course(self, course: dict) -> int:
         course_id = course["id"]
@@ -98,7 +117,7 @@ class Syncer:
             if self._already_downloaded(file_id):
                 logger.debug("Already downloaded: %s", title)
                 continue
-            paths = dl.download_file(self.drive, file_id, dest_dir, title)
+            paths = dl.download_file(self.drive, file_id, dest_dir, title, self._failures)
             if paths:
                 self._record(file_id, paths[0])
                 count += 1

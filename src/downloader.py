@@ -1,6 +1,9 @@
 import io
+import json
 import os
 import re
+import random
+import time
 import logging
 
 from googleapiclient.http import MediaIoBaseDownload
@@ -28,25 +31,71 @@ EXPORT_FORMATS: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
+_RATE_LIMIT_REASONS = {"rateLimitExceeded", "userRateLimitExceeded"}
+_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+MAX_RETRIES = 5
+
 
 def sanitize(name: str, max_len: int = 180) -> str:
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
     return name[:max_len].strip(". ")
 
 
-def download_file(drive_svc, file_id: str, dest_dir: str, hint_title: str | None = None) -> list[str]:
+def _error_reason(exc: HttpError) -> str:
+    try:
+        content = json.loads(exc.content)
+        return content.get("error", {}).get("errors", [{}])[0].get("reason", "")
+    except Exception:
+        return ""
+
+
+def _is_retryable(exc: HttpError) -> bool:
+    if exc.resp.status in _RETRYABLE_STATUSES:
+        return True
+    if exc.resp.status == 403 and _error_reason(exc) in _RATE_LIMIT_REASONS:
+        return True
+    return False
+
+
+def _with_retry(fn):
+    """Call fn(), retrying on rate-limit / transient errors with exponential backoff."""
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            return fn()
+        except HttpError as exc:
+            if _is_retryable(exc) and attempt < MAX_RETRIES:
+                wait = (2 ** attempt) + random.uniform(0, 1)
+                logger.warning(
+                    "Rate limit / server error (attempt %d/%d), retrying in %.1fs...",
+                    attempt + 1, MAX_RETRIES, wait,
+                )
+                time.sleep(wait)
+            else:
+                raise
+
+
+def download_file(
+    drive_svc,
+    file_id: str,
+    dest_dir: str,
+    hint_title: str | None = None,
+    failures: list | None = None,
+) -> list[str]:
     """
     Download a Drive file to dest_dir.
     Google Workspace files are exported in all configured formats (PDF + Office).
     Returns a list of successfully written paths (empty on total failure).
+    Failed downloads are appended to `failures` as {"title": ..., "file_id": ..., "reason": ...}.
     """
     try:
-        meta = drive_svc.files().get(
+        meta = _with_retry(lambda: drive_svc.files().get(
             fileId=file_id,
             fields="id,name,mimeType,modifiedTime",
-        ).execute()
+        ).execute())
     except HttpError as exc:
         logger.error("Metadata fetch failed for %s: %s", file_id, exc)
+        if failures is not None:
+            failures.append({"title": hint_title or file_id, "file_id": file_id, "reason": str(exc)})
         return []
 
     mime = meta.get("mimeType", "")
@@ -56,7 +105,7 @@ def download_file(drive_svc, file_id: str, dest_dir: str, hint_title: str | None
     if mime in EXPORT_FORMATS:
         paths = []
         for export_mime, ext in EXPORT_FORMATS[mime]:
-            path = _export(drive_svc, file_id, meta["name"], name, dest_dir, export_mime, ext)
+            path = _export(drive_svc, file_id, meta["name"], name, dest_dir, export_mime, ext, failures)
             if path:
                 paths.append(path)
         return paths
@@ -65,34 +114,40 @@ def download_file(drive_svc, file_id: str, dest_dir: str, hint_title: str | None
         logger.info("Skipping non-exportable Google file: %s (%s)", meta["name"], mime)
         return []
 
-    path = _download_binary(drive_svc, file_id, meta["name"], name, dest_dir)
+    path = _download_binary(drive_svc, file_id, meta["name"], name, dest_dir, failures)
     return [path] if path else []
 
 
-def _export(drive_svc, file_id: str, display_name: str, safe_name: str, dest_dir: str, mime: str, ext: str) -> str | None:
+def _export(drive_svc, file_id: str, display_name: str, safe_name: str, dest_dir: str, mime: str, ext: str, failures: list | None = None) -> str | None:
     dest_path = os.path.join(dest_dir, safe_name + ext)
     logger.info("Exporting  %s → %s", display_name, dest_path)
     try:
-        request = drive_svc.files().export_media(fileId=file_id, mimeType=mime)
-        _write_stream(request, dest_path)
+        _with_retry(lambda: _write_stream(drive_svc.files().export_media(fileId=file_id, mimeType=mime), dest_path))
         return dest_path
     except HttpError as exc:
         logger.error("Export failed for %s: %s", display_name, exc)
+        if failures is not None:
+            failures.append({"title": display_name, "file_id": file_id, "reason": str(exc)})
         return None
 
 
-def _download_binary(drive_svc, file_id: str, display_name: str, safe_name: str, dest_dir: str) -> str | None:
+def _download_binary(drive_svc, file_id: str, display_name: str, safe_name: str, dest_dir: str, failures: list | None = None) -> str | None:
     dest_path = os.path.join(dest_dir, safe_name)
     logger.info("Downloading %s → %s", display_name, dest_path)
     try:
-        request = drive_svc.files().get_media(fileId=file_id)
-        _write_stream(request, dest_path)
+        _with_retry(lambda: _write_stream(drive_svc.files().get_media(fileId=file_id), dest_path))
         return dest_path
     except HttpError as exc:
+        reason = _error_reason(exc)
         if exc.resp.status == 403:
-            logger.warning("Access denied for %s — skipping", display_name)
+            if reason == "cannotDownloadFile":
+                logger.warning("Download restricted for %s — skipping", display_name)
+            else:
+                logger.warning("Access denied for %s — skipping", display_name)
         else:
             logger.error("Download failed for %s: %s", display_name, exc)
+        if failures is not None:
+            failures.append({"title": display_name, "file_id": file_id, "reason": reason or str(exc)})
         return None
 
 
