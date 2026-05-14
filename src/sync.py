@@ -98,8 +98,8 @@ class Syncer:
             if self._already_downloaded(file_id):
                 logger.debug("Already downloaded: %s", title)
                 continue
-            path = dl.download_file(self.drive, file_id, dest_dir, title)
-            if path:
-                self._record(file_id, path)
+            paths = dl.download_file(self.drive, file_id, dest_dir, title)
+            if paths:
+                self._record(file_id, paths[0])
                 count += 1
         return count

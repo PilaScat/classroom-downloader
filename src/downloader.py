@@ -2,30 +2,30 @@ import io
 import os
 import re
 import logging
-import time
 
 from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.errors import HttpError
 
 logger = logging.getLogger(__name__)
 
-# Maps Google Workspace MIME types to their export format (mime, extension)
-EXPORT_FORMATS: dict[str, tuple[str, str]] = {
-    "application/vnd.google-apps.document":     ("application/pdf", ".pdf"),
-    "application/vnd.google-apps.presentation": ("application/pdf", ".pdf"),
-    "application/vnd.google-apps.drawing":      ("application/pdf", ".pdf"),
-    "application/vnd.google-apps.spreadsheet":  (
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ".xlsx",
-    ),
-}
-
-# Google Workspace types that cannot be meaningfully exported
-UNEXPORTABLE = {
-    "application/vnd.google-apps.form",
-    "application/vnd.google-apps.site",
-    "application/vnd.google-apps.map",
-    "application/vnd.google-apps.script",
+# Each Google Workspace MIME type maps to a list of (export_mime, extension) to produce.
+# Files are exported in every format listed — PDF always first, Office second where applicable.
+EXPORT_FORMATS: dict[str, list[tuple[str, str]]] = {
+    "application/vnd.google-apps.document": [
+        ("application/pdf", ".pdf"),
+        ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx"),
+    ],
+    "application/vnd.google-apps.spreadsheet": [
+        ("application/pdf", ".pdf"),
+        ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx"),
+    ],
+    "application/vnd.google-apps.presentation": [
+        ("application/pdf", ".pdf"),
+        ("application/vnd.openxmlformats-officedocument.presentationml.presentation", ".pptx"),
+    ],
+    "application/vnd.google-apps.drawing": [
+        ("application/pdf", ".pdf"),
+    ],
 }
 
 
@@ -34,11 +34,11 @@ def sanitize(name: str, max_len: int = 180) -> str:
     return name[:max_len].strip(". ")
 
 
-def download_file(drive_svc, file_id: str, dest_dir: str, hint_title: str | None = None) -> str | None:
+def download_file(drive_svc, file_id: str, dest_dir: str, hint_title: str | None = None) -> list[str]:
     """
     Download a Drive file to dest_dir.
-    Google Docs/Sheets/Slides are exported as PDF.
-    Returns the destination path, or None on failure.
+    Google Workspace files are exported in all configured formats (PDF + Office).
+    Returns a list of successfully written paths (empty on total failure).
     """
     try:
         meta = drive_svc.files().get(
@@ -47,21 +47,26 @@ def download_file(drive_svc, file_id: str, dest_dir: str, hint_title: str | None
         ).execute()
     except HttpError as exc:
         logger.error("Metadata fetch failed for %s: %s", file_id, exc)
-        return None
+        return []
 
     mime = meta.get("mimeType", "")
     name = sanitize(hint_title or meta.get("name", file_id))
     os.makedirs(dest_dir, exist_ok=True)
 
     if mime in EXPORT_FORMATS:
-        export_mime, ext = EXPORT_FORMATS[mime]
-        return _export(drive_svc, file_id, meta["name"], name, dest_dir, export_mime, ext)
+        paths = []
+        for export_mime, ext in EXPORT_FORMATS[mime]:
+            path = _export(drive_svc, file_id, meta["name"], name, dest_dir, export_mime, ext)
+            if path:
+                paths.append(path)
+        return paths
 
     if mime.startswith("application/vnd.google-apps."):
         logger.info("Skipping non-exportable Google file: %s (%s)", meta["name"], mime)
-        return None
+        return []
 
-    return _download_binary(drive_svc, file_id, meta["name"], name, dest_dir)
+    path = _download_binary(drive_svc, file_id, meta["name"], name, dest_dir)
+    return [path] if path else []
 
 
 def _export(drive_svc, file_id: str, display_name: str, safe_name: str, dest_dir: str, mime: str, ext: str) -> str | None:
