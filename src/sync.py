@@ -9,9 +9,9 @@ import downloader as dl
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = os.getenv("DATA_DIR", "/data")
+DATA_DIR = os.getenv("DATA_DIR", "./data")
 STATE_FILE = os.path.join(DATA_DIR, "state.json")
-DOWNLOADS_DIR = os.getenv("DOWNLOADS_DIR", "/downloads")
+DOWNLOADS_DIR = os.getenv("DOWNLOADS_DIR", "./downloads")
 
 
 def _safe(name: str, max_len: int = 100) -> str:
@@ -77,6 +77,8 @@ class Syncer:
             for entry in self._failures:
                 fh.write(f"- {entry['title']}\n")
                 fh.write(f"  https://drive.google.com/file/d/{entry['file_id']}/view\n")
+                if entry.get("mime"):
+                    fh.write(f"  Tipo: {entry['mime']}\n")
                 if entry.get("reason"):
                     fh.write(f"  Motivo: {entry['reason']}\n")
                 fh.write("\n")

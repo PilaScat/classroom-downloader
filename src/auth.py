@@ -16,7 +16,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
-DATA_DIR = os.getenv("DATA_DIR", "/data")
+DATA_DIR = os.getenv("DATA_DIR", "./data")
 TOKEN_PATH = os.path.join(DATA_DIR, "token.pickle")
 CREDENTIALS_PATH = os.path.join(DATA_DIR, "credentials.json")
 
@@ -40,7 +40,7 @@ def _load_credentials():
     if not os.path.exists(TOKEN_PATH):
         raise RuntimeError(
             "No token found. Run authentication first:\n"
-            "  docker compose run --rm -it classroom-downloader python main.py auth"
+            "  python src/main.py auth"
         )
     with open(TOKEN_PATH, "rb") as fh:
         return pickle.load(fh)
@@ -57,7 +57,7 @@ def get_credentials():
         else:
             raise RuntimeError(
                 "Token is invalid and cannot be refreshed. Re-run authentication:\n"
-                "  docker compose run --rm -it classroom-downloader python main.py auth"
+                "  python src/main.py auth"
             )
     return creds
 

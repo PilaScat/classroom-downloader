@@ -4,6 +4,9 @@ import sys
 import time
 
 import schedule
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from auth import authenticate, build_services
 from sync import Syncer

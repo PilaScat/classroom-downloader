@@ -52,43 +52,65 @@ mkdir data
 mv ~/Downloads/credentials.json data/credentials.json
 ```
 
-### 2. First-time authentication (once only)
-
-Authentication must be run **directly on the host** (not inside Docker) because it requires a local browser.
+### 2. Create the virtual environment and install dependencies
 
 ```bash
-# Create a virtualenv and install dependencies
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+```
 
-# Run authentication
-DATA_DIR=./data .venv/bin/python src/main.py auth
+### 3. Configure (optional)
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` if you want to change the sync interval or directory paths.
+
+### 4. Authenticate (once only)
+
+```bash
+.venv/bin/python src/main.py auth
 ```
 
 A URL will be printed — open it in your browser and authorize the app with your Google account.  
-The token is saved automatically to `data/token.pickle` and used by Docker on every sync.
+The token is saved automatically to `data/token.pickle`.
 
-### 3. Start the downloader
+### 5. Run the downloader
 
 ```bash
-docker compose up -d
+.venv/bin/python src/main.py
 ```
 
-### 4. Check logs
+To run it in the background:
 
 ```bash
-docker compose logs -f
+nohup .venv/bin/python src/main.py &
 ```
 
 ---
 
 ## Configuration
 
-Copy `.env.example` to `.env` and edit as needed:
+Edit `.env` (copied from `.env.example`):
 
 ```env
 SYNC_INTERVAL_MINUTES=60   # sync frequency in minutes
+
+# Only download files of these MIME types (leave empty for everything)
+ALLOWED_MIME_TYPES=application/pdf
 ```
+
+Google Workspace files (Docs, Sheets, Slides) are always exported to PDF/Office regardless of this filter.
+
+Common MIME types:
+
+| Type | MIME |
+|------|------|
+| PDF | `application/pdf` |
+| Video MP4 | `video/mp4` |
+| Image JPEG | `image/jpeg` |
+| Image PNG | `image/png` |
 
 ---
 
@@ -96,10 +118,9 @@ SYNC_INTERVAL_MINUTES=60   # sync frequency in minutes
 
 | Command | Description |
 |---------|-------------|
-| `docker compose up -d` | Start in background |
-| `docker compose down` | Stop |
-| `docker compose logs -f` | Follow logs |
-| `DATA_DIR=./data .venv/bin/python src/main.py auth` | Re-authenticate |
+| `.venv/bin/python src/main.py` | Start the sync daemon |
+| `.venv/bin/python src/main.py auth` | Re-authenticate |
+| `nohup .venv/bin/python src/main.py &` | Run in background |
 
 To force a full re-download of all files, delete `data/state.json`.
 

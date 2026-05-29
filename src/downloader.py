@@ -31,6 +31,66 @@ EXPORT_FORMATS: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
+_MIME_EXTENSIONS: dict[str, str] = {
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/x-msvideo": ".avi",
+    "video/webm": ".webm",
+    "video/ogg": ".ogv",
+    "application/pdf": ".pdf",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "audio/mpeg": ".mp3",
+    "audio/ogg": ".ogg",
+    "audio/wav": ".wav",
+    "text/plain": ".txt",
+    "application/zip": ".zip",
+    "application/x-zip-compressed": ".zip",
+}
+
+
+def _ext_for_mime(mime: str) -> str | None:
+    """Return the canonical extension for a MIME type, or None if unknown."""
+    if mime in _MIME_EXTENSIONS:
+        return _MIME_EXTENSIONS[mime]
+    if mime.startswith("video/"):
+        return "." + mime.split("/")[-1]
+    if mime.startswith("audio/"):
+        return "." + mime.split("/")[-1]
+    return None
+
+
+_MIME_LABELS: dict[str, str] = {
+    "video/mp4": "video (mp4)",
+    "video/quicktime": "video (mov)",
+    "video/x-msvideo": "video (avi)",
+    "video/webm": "video (webm)",
+    "application/pdf": "pdf",
+    "application/vnd.google-apps.document": "Google Doc",
+    "application/vnd.google-apps.spreadsheet": "Google Sheet",
+    "application/vnd.google-apps.presentation": "Google Slides",
+    "application/vnd.google-apps.drawing": "Google Drawing",
+    "application/vnd.google-apps.video": "video (Google)",
+    "image/jpeg": "immagine (jpeg)",
+    "image/png": "immagine (png)",
+    "audio/mpeg": "audio (mp3)",
+}
+
+
+def _mime_label(mime: str) -> str:
+    if mime in _MIME_LABELS:
+        return _MIME_LABELS[mime]
+    if mime.startswith("video/"):
+        return f"video ({mime.split('/')[-1]})"
+    if mime.startswith("audio/"):
+        return f"audio ({mime.split('/')[-1]})"
+    if mime.startswith("image/"):
+        return f"immagine ({mime.split('/')[-1]})"
+    return mime
+
+
 _RATE_LIMIT_REASONS = {"rateLimitExceeded", "userRateLimitExceeded"}
 _RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 MAX_RETRIES = 5
@@ -100,12 +160,20 @@ def download_file(
 
     mime = meta.get("mimeType", "")
     name = sanitize(hint_title or meta.get("name", file_id))
+
+    allowed_env = os.getenv("ALLOWED_MIME_TYPES", "").strip()
+    if allowed_env and not mime.startswith("application/vnd.google-apps."):
+        allowed = {m.strip() for m in allowed_env.split(",") if m.strip()}
+        if mime not in allowed:
+            logger.debug("Skipping %s (%s) — not in ALLOWED_MIME_TYPES", name, mime)
+            return []
+
     os.makedirs(dest_dir, exist_ok=True)
 
     if mime in EXPORT_FORMATS:
         paths = []
         for export_mime, ext in EXPORT_FORMATS[mime]:
-            path = _export(drive_svc, file_id, meta["name"], name, dest_dir, export_mime, ext, failures)
+            path = _export(drive_svc, file_id, meta["name"], name, dest_dir, export_mime, ext, mime, failures)
             if path:
                 paths.append(path)
         return paths
@@ -114,11 +182,11 @@ def download_file(
         logger.info("Skipping non-exportable Google file: %s (%s)", meta["name"], mime)
         return []
 
-    path = _download_binary(drive_svc, file_id, meta["name"], name, dest_dir, failures)
+    path = _download_binary(drive_svc, file_id, meta["name"], name, dest_dir, mime, failures)
     return [path] if path else []
 
 
-def _export(drive_svc, file_id: str, display_name: str, safe_name: str, dest_dir: str, mime: str, ext: str, failures: list | None = None) -> str | None:
+def _export(drive_svc, file_id: str, display_name: str, safe_name: str, dest_dir: str, mime: str, ext: str, source_mime: str, failures: list | None = None) -> str | None:
     dest_path = os.path.join(dest_dir, safe_name + ext)
     logger.info("Exporting  %s → %s", display_name, dest_path)
     try:
@@ -127,12 +195,19 @@ def _export(drive_svc, file_id: str, display_name: str, safe_name: str, dest_dir
     except HttpError as exc:
         logger.error("Export failed for %s: %s", display_name, exc)
         if failures is not None:
-            failures.append({"title": display_name, "file_id": file_id, "reason": str(exc)})
+            failures.append({"title": display_name, "file_id": file_id, "reason": str(exc), "mime": _mime_label(source_mime)})
         return None
 
 
-def _download_binary(drive_svc, file_id: str, display_name: str, safe_name: str, dest_dir: str, failures: list | None = None) -> str | None:
-    dest_path = os.path.join(dest_dir, safe_name)
+def _download_binary(drive_svc, file_id: str, display_name: str, safe_name: str, dest_dir: str, source_mime: str, failures: list | None = None) -> str | None:
+    correct_ext = _ext_for_mime(source_mime)
+    if correct_ext:
+        base, existing_ext = os.path.splitext(safe_name)
+        if existing_ext.lower() != correct_ext.lower():
+            logger.info("Renaming %s%s → %s%s (MIME: %s)", base, existing_ext, base, correct_ext, source_mime)
+        dest_path = os.path.join(dest_dir, base + correct_ext)
+    else:
+        dest_path = os.path.join(dest_dir, safe_name)
     logger.info("Downloading %s → %s", display_name, dest_path)
     try:
         _with_retry(lambda: _write_stream(drive_svc.files().get_media(fileId=file_id), dest_path))
@@ -147,7 +222,7 @@ def _download_binary(drive_svc, file_id: str, display_name: str, safe_name: str,
         else:
             logger.error("Download failed for %s: %s", display_name, exc)
         if failures is not None:
-            failures.append({"title": display_name, "file_id": file_id, "reason": reason or str(exc)})
+            failures.append({"title": display_name, "file_id": file_id, "reason": reason or str(exc), "mime": _mime_label(source_mime)})
         return None
 
 
